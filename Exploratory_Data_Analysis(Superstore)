@@ -1,0 +1,204 @@
+# 1) загрзука данных
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+pd.set_option('display.max_columns', 500)
+
+# 2) первичный анализ
+Superstore = pd.read_csv(r'C:\Users\Марат\Jupiter projects\research analysis\Sample - Superstore.csv', sep = ',', encoding = 'ISO-8859-1')
+
+Superstore.head(5)
+
+Superstore.info()
+
+Superstore.describe()
+
+# количество строк и столбцов
+rc = pd.DataFrame(Superstore)
+print('Количество строк/количество столбцов:', rc.shape)
+
+Superstore.columns
+
+Superstore.index
+
+print('Дубликаты строк:', Superstore.index.is_unique, 'Дубликаты столбцов:', Superstore.columns.is_unique)
+# Дубликаты строк: True Дубликаты столбцов: True
+
+Superstore.columns
+#Index(['Row ID', 'Order ID', 'Order Date', 'Ship Date', 'Ship Mode',
+#       'Customer ID', 'Customer Name', 'Segment', 'Country', 'City', 'State',
+#       'Postal Code', 'Region', 'Product ID', 'Category', 'Sub-Category',
+#       'Product Name', 'Sales', 'Quantity', 'Discount', 'Profit'],
+#      dtype='object')
+
+# проверка на наличие дубликатов
+Superstore.shape, Superstore.drop_duplicates().shape
+# ((9994, 21), (9994, 21))
+
+# удаление дубликатов строк
+Superstore_unique = Superstore.drop_duplicates(keep = False)
+Superstore_unique
+
+Superstore_unique = pd.DataFrame(Superstore_unique)
+print(type(Superstore_unique)) #<class 'pandas.core.frame.DataFrame'>
+print(type(Superstore)) #<class 'pandas.core.frame.DataFrame'>
+
+# 3) обработка пропусков
+# определяем столбцы с пропусками
+SU_pass = Superstore_unique.isnull()
+SU_pass
+
+missing = Superstore_unique.isnull().any().any() #1 any() проверяет на наличие хотя бы 1 null в столбце и возвращает Series с True или False для каждого столбца, второй any() проверяет получившийся Series на True или False и проверяет вернул ли хоть 1 столбец True. 
+'Пропуски:', missing
+# ('Пропуски:', False)
+
+# 4) преобразование данных
+# создаём новый столбец Profit Margin
+Superstore_unique['Profit Margin'] = (Superstore_unique['Profit'] / Superstore_unique['Sales'] * 100).round(2)
+Superstore_unique.head(5)
+
+# преобразование столбца Order Date в формат datetime
+Superstore_unique['Order Date'] = pd.to_datetime(Superstore_unique['Order Date'])
+Superstore_unique['Ship Date'] = pd.to_datetime(Superstore_unique['Ship Date'])
+print(type(Superstore_unique['Order Date'][1])) # <class 'pandas._libs.tslibs.timestamps.Timestamp'>
+Superstore_unique.dtypes
+
+Superstore_unique.head(5)
+
+# извлечение частей даты в отдельные колонки
+Superstore_unique['year'] = Superstore_unique['Order Date'].dt.year
+Superstore_unique['month'] = Superstore_unique['Order Date'].dt.month
+Superstore_unique['day'] = Superstore_unique['Order Date'].dt.day
+
+# 5) анализ с группировкой
+# Общие продажи и прибыль по категориям товаров
+Sales_for_category = Superstore_unique.groupby('Category')['Sales'].sum() # Общие продажи по категориям товаров
+Profit_for_category = Superstore_unique.groupby('Category')['Profit'].sum() # Общая прибыль по категориям товаров
+
+Sales_for_category = Superstore_unique.groupby(['Category']).agg({'Sales':'sum'}) # более оптимальный вариант
+Profit_for_category = Superstore_unique.groupby(['Category']).agg({'Profit':'sum'})
+
+# маржа
+Margin_for_category = Superstore_unique.groupby('Category')['Profit Margin'].median()
+Margin_for_category = pd.DataFrame(Margin_for_category).rename(columns={'Profit Margin':'Median Margin'})
+
+cat_sales_profit = pd.merge(Sales_for_category, Profit_for_category, how = 'left', on = 'Category')
+result_cat = pd.merge(cat_sales_profit, Margin_for_category, how = 'left', on = 'Category')
+cat_sales_profit = Sales_for_category.merge(Profit_for_category, how = 'left', on = 'Category') # более оптимальный вариант. Не обязательно всегда писать pd
+print('Общие продажи и прибыль по категориям товаров:')
+print(result_cat[['Sales', 'Profit', 'Median Margin']].sort_values(by='Sales', ascending=False))
+
+#Общие продажи и прибыль по категориям товаров:
+#                       Sales       Profit  Median Margin
+#Category                                                
+#Technology       836154.0330  145454.9481          18.00
+#Furniture        741999.7953   18451.2728          11.11
+#Office Supplies  719047.0320  122490.8008          32.50
+
+# проверка подсчёта по Category = Furniture
+valid_1 = Superstore_unique[Superstore_unique['Category'] == 'Furniture']
+valid_sales = valid_1['Sales'].sum()
+valid_profit = valid_1['Profit'].sum()
+print('Проверка продаж по категории Furniture: ', valid_sales) # Проверка продаж по категории Furniture:  741999.7953
+print('Проверка прибыли по категории Furniture: ', valid_profit) # Проверка прибыли по категории Furniture:  18451.272800000006
+
+# Топ 5 товаров по количеству заказов
+# 1) посчитаем количество заказов для всех товаров
+orders_for_prod = Superstore_unique.groupby('Product ID')['Order ID'].count()
+orders_for_prod = pd.DataFrame(orders_for_prod)
+orders_for_prod = orders_for_prod.rename(columns = {'Order ID':'Count Orders'})
+
+# 2) Создадим таблицу с id товаров и их наименованием
+Product_name = Superstore_unique.loc[:, ['Product ID','Product Name']].copy() # создание независимой копии с названием и id товаров
+Product_name = Product_name.drop_duplicates(subset = 'Product ID', keep = 'first') # keep=first сохраняет первую встретевшуюся строку для каждого дубликата, остальные удаляет
+
+# 3) Объединяем таблицы с id товаров и количеством заказов с их наименованием
+result = pd.merge(orders_for_prod, Product_name, on = 'Product ID', how = 'left')
+result = result.loc[:, ['Product ID', 'Product Name', 'Count Orders']] # меянем столбцы местами
+result # наименования товаров и количество заказов
+
+top_5_Product = result.nlargest(5, columns = 'Count Orders')
+
+print('Топ 5 товаров по количеству заказов: ')
+top_5_Product
+
+#   Product ID	Product Name	                                            Count Orders
+#   1144	    OFF-PA-10001970	Xerox 1881	                                    19
+#   1569	    TEC-AC-10003832	Logitech P710e Mobile Speakerphone	            18
+#   295	        FUR-FU-10004270	Eldon Image Series Desk Accessories, Burgundy	16
+#   65	        FUR-CH-10001146	Global Value Mid-Back Manager's Chair, Gray	    15
+#   93	        FUR-CH-10002647	Situations Contoured Folding Chairs, 4/Set	    15
+
+# поиск региона с максимальной средней прибылью
+region_avg_profit = Superstore_unique.groupby('Region').agg({'Profit':'mean'})
+region_avg_profit = region_avg_profit.sort_values('Profit', ascending = False)
+result_reg = region_avg_profit.copy().nlargest(1, columns = 'Profit')
+
+print('Регион с максимальной средней прибылью: ', result_reg, sep='\n')
+
+# Регион с максимальной средней прибылью: 
+#           Profit
+# Region           
+# West    33.849032
+
+# расчёт 90-го перцентиля для продаж
+sales_90_per = np.percentile(Superstore_unique.loc[:, ['Sales']], 90)
+print('90-й перцентиль продаж: ', sales_90_per) # 90-й перцентиль продаж:  572.7060000000001
+
+# создание категории товаров на основе прибыли
+profit = (Superstore_unique.loc[:, ['Profit']]).describe()
+profit
+
+Superstore_unique['Profit Category'] = ''
+
+Superstore_unique.loc[Superstore_unique['Profit'] <= 1.728750, 'Profit Category'] = 'Lower'
+Superstore_unique.loc[(Superstore_unique['Profit'] > 1.728750) & (Superstore_unique['Profit'] <= 8.666500), 'Profit Category'] = 'Middle'
+Superstore_unique.loc[(Superstore_unique['Profit'] > 8.666500) & (Superstore_unique['Profit'] <= 29.364000), 'Profit Category'] = 'High'
+Superstore_unique.loc[Superstore_unique['Profit'] > 29.364000, 'Profit Category'] = 'Very High'
+
+Superstore_unique.loc[:, ['Row ID', 'Order ID', 'Order Date', 'Ship Date', 'Customer ID', 'Segment', 'Country', 'City', 'Region', 'Category', 'Sub-Category', 'Product Name', 'Sales', 'Profit', 'Profit Margin', 'Profit Category']]
+
+
+# визуализация
+# график продаж по месяцам
+
+Superstore_unique['Order Date'] = pd.to_datetime(Superstore_unique['Order Date']) # создание новой колонки в формате год-месяц
+Superstore_unique['year_month'] = Superstore_unique['Order Date'].dt.strftime('%Y-%m')
+Superstore_sales_for_year = Superstore_unique.groupby('year_month', as_index = False).agg({'Sales':'sum'})
+
+Superstore_sort = Superstore_sales_for_year.sort_values('year_month', ascending = True) # настриваем параметры для корректного графика, 1 сортируем даты
+
+plt.figure(figsize=(15, 6))
+plt.plot(
+    Superstore_sort['year_month'], 
+    Superstore_sort['Sales'],
+    marker = 'o',
+    linestyle = '-',
+    color = 'seagreen',
+    linewidth = 2
+        )
+plt.xticks(Superstore_sort['year_month'], rotation=45)
+plt.grid(axis = 'x')
+plt.show()
+
+# график распределения прибыли по регионам
+region_profit = Superstore_unique.groupby('Region', as_index = False).agg({'Profit':'sum'})
+region_profit_sort = region_profit.sort_values('Profit', ascending = False)
+
+colors = ['brown', 'yellow', 'orange', 'green']
+
+categories = region_profit_sort['Region']
+values = region_profit_sort['Profit']
+
+bars = plt.bar(
+    categories,
+    values,
+    color = colors
+    )
+
+for bar in bars:
+    yval = bar.get_height()
+    plt.annotate(f'{yval}', xy=(bar.get_x()+bar.get_width()/2, yval),
+                 ha='center', va='bottom')
+
+plt.show()
